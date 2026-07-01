@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { invoke } from "@tauri-apps/api/core";
 import type { AppError, Connection, QueryResult } from "@/lib/types";
 import { useErrorLogStore } from "./error-log-store";
+import { useSecretStore } from "./secret-store";
 
 export interface QueryTab {
   id: string;
@@ -97,6 +98,7 @@ export const useQueryStore = create<QueryState>((set, get) => ({
       // Execute all statements; for v1 we join them and run as one query.
       // InfluxDB /query supports multiple semicolon-separated statements.
       const query = statements.join(";\n");
+      const secret = useSecretStore.getState().getSecret(tab.connection);
       const response = await invoke<{
         results: QueryResult[];
         auto_limit_applied: boolean;
@@ -105,7 +107,7 @@ export const useQueryStore = create<QueryState>((set, get) => ({
       }>("run_query_cmd", {
         input: {
           connection: tab.connection,
-          secret: null,
+          secret,
           database: tab.database,
           query,
           query_id: queryId,

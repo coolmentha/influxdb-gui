@@ -10,14 +10,17 @@ interface Props {
   onChange: (value: string) => void;
   onCtrlEnter?: () => void;
   onCtrlShiftEnter?: () => void;
+  onSelectionChange?: (from: number, to: number) => void;
 }
 
 /** Minimal CodeMirror 6 editor for InfluxQL. */
-export function CodeMirrorEditor({ value, onChange, onCtrlEnter, onCtrlShiftEnter }: Props) {
+export function CodeMirrorEditor({ value, onChange, onCtrlEnter, onCtrlShiftEnter, onSelectionChange }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
+  const onSelRef = useRef(onSelectionChange);
+  onSelRef.current = onSelectionChange;
 
   // Extra keybindings for Ctrl+Enter and Ctrl+Shift+Enter
   const extraKeys = useCallback(() => keymap.of([
@@ -52,6 +55,10 @@ export function CodeMirrorEditor({ value, onChange, onCtrlEnter, onCtrlShiftEnte
         EditorView.updateListener.of((update) => {
           if (update.docChanged) {
             onChangeRef.current(update.state.doc.toString());
+          }
+          if (update.selectionSet) {
+            const sel = update.state.selection.main;
+            onSelRef.current?.(sel.from, sel.to);
           }
         }),
         EditorView.theme({

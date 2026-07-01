@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { useQueryStore } from "@/stores/query-store";
 import { useSecretStore } from "@/stores/secret-store";
-import { splitStatements } from "@/lib/execution-scope";
+import { splitStatements, resolveExecutionScope } from "@/lib/execution-scope";
 import { appErrorMessage } from "@/lib/types";
 import { Play, Square } from "lucide-react";
 import { ResultGrid } from "./result-grid";
@@ -18,6 +18,8 @@ export function QueryEditor({ tab }: Props) {
   const exec = executions[tab.id];
   const [scopeLabel, setScopeLabel] = useState<string>("");
   const [activeResultIdx, setActiveResultIdx] = useState(0);
+  const [selFrom, setSelFrom] = useState(0);
+  const [selTo, setSelTo] = useState(0);
 
   // Load secret for the connection (cached in secret store)
   const fetchSecret = useSecretStore((s) => s.fetchSecret);
@@ -33,14 +35,7 @@ export function QueryEditor({ tab }: Props) {
     if (all) {
       scope = { scope: "all" as const, statements: splitStatements(source) };
     } else {
-      // When triggered by CM6 Ctrl+Enter (no selection info), run everything.
-      // The user can select text to run specific selection (handled at store level for now).
-      const statements = splitStatements(source);
-      if (statements.length === 1) {
-        scope = { scope: "cursor" as const, statements };
-      } else {
-        scope = { scope: "all" as const, statements };
-      }
+      scope = resolveExecutionScope(source, selFrom, selTo, selFrom);
     }
 
     const labels = { selection: "选区", cursor: "光标语句", all: "全部" };
@@ -82,6 +77,7 @@ export function QueryEditor({ tab }: Props) {
         onChange={handleSourceChange}
         onCtrlEnter={() => runStatements(false)}
         onCtrlShiftEnter={() => runStatements(true)}
+        onSelectionChange={(from, to) => { setSelFrom(from); setSelTo(to); }}
       />
 
       {/* Scope indicator */}
