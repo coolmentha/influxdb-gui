@@ -1,7 +1,9 @@
 import { useState, useMemo } from "react";
+import { Button } from "@/components/ui/button";
+import { seriesToCsv, seriesToJson, downloadFile } from "@/lib/export";
 import type { QueryResult } from "@/lib/types";
 import { formatTimeValue, type TimeDisplayMode } from "@/lib/time-format";
-import { ChevronUp, ChevronDown, Copy, Search } from "lucide-react";
+import { ChevronUp, ChevronDown, Copy, Search, Download } from "lucide-react";
 
 interface Props {
   result: QueryResult;
@@ -94,6 +96,20 @@ export function ResultGrid({ result }: Props) {
           </div>
         )}
         <div className="ml-auto flex items-center gap-1">
+          <Button variant="ghost" size="sm" className="h-6 text-xs" onClick={() => {
+            const s = series;
+            if (s) downloadFile(seriesToCsv(s), `${s.name}.csv`, "text/csv");
+          }}>
+            <Download className="h-3 w-3" />
+            CSV
+          </Button>
+          <Button variant="ghost" size="sm" className="h-6 text-xs" onClick={() => {
+            const s = series;
+            if (s) downloadFile(seriesToJson(s), `${s.name}.json`, "application/json");
+          }}>
+            <Download className="h-3 w-3" />
+            JSON
+          </Button>
           <Search className="h-3 w-3 text-muted-foreground" />
           <input
             className="h-6 w-40 rounded border border-input bg-background px-2 text-xs"

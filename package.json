@@ -18,7 +18,10 @@
     "lint": "tsc --noEmit"
   },
   "dependencies": {
+    "@codemirror/autocomplete": "^6.20.3",
+    "@codemirror/commands": "^6.10.4",
     "@codemirror/lang-sql": "^6.8.0",
+    "@codemirror/language": "^6.12.4",
     "@codemirror/state": "^6.5.2",
     "@codemirror/view": "^6.36.4",
     "@radix-ui/react-context-menu": "^2.2.5",

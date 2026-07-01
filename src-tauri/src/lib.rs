@@ -35,6 +35,7 @@ pub fn run() {
             commands::list_tag_keys_cmd,
             commands::list_field_keys_cmd,
             commands::run_query_cmd,
+            commands::cancel_query_cmd,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
