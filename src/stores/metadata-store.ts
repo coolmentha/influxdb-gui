@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { invoke } from "@tauri-apps/api/core";
-import type { AppError, Connection } from "@/lib/types";
+import type { AppError, Connection, FieldKey } from "@/lib/types";
 
 interface MetadataState {
   /** Per-connection, per-database list of databases. */
@@ -10,14 +10,14 @@ interface MetadataState {
   /** Per-connection tag keys: key `${database}:${measurement}` -> keys. */
   tagKeys: Record<string, string[]>;
   /** Per-connection field keys: key `${database}:${measurement}` -> keys. */
-  fieldKeys: Record<string, string[]>;
+  fieldKeys: Record<string, FieldKey[]>;
   loading: boolean;
   error: AppError | null;
 
   fetchDatabases: (conn: Connection, secret?: string | null) => Promise<string[]>;
   fetchMeasurements: (conn: Connection, database: string, secret?: string | null) => Promise<string[]>;
   fetchTagKeys: (conn: Connection, database: string, measurement: string, secret?: string | null) => Promise<string[]>;
-  fetchFieldKeys: (conn: Connection, database: string, measurement: string, secret?: string | null) => Promise<string[]>;
+  fetchFieldKeys: (conn: Connection, database: string, measurement: string, secret?: string | null) => Promise<FieldKey[]>;
   clearConnection: (connId: string) => void;
 }
 
@@ -82,7 +82,7 @@ export const useMetadataStore = create<MetadataState>((set, get) => ({
     const key = `${dbKey(conn.id, database)}:${measurement}`;
     const cached = get().fieldKeys[key];
     if (cached) return cached;
-    const keys = await invoke<string[]>("list_field_keys_cmd", {
+    const keys = await invoke<FieldKey[]>("list_field_keys_cmd", {
       connection: conn,
       secret: secret ?? null,
       database,
@@ -94,7 +94,7 @@ export const useMetadataStore = create<MetadataState>((set, get) => ({
 
   clearConnection: (connId) => {
     const prefix = `${connId}:`;
-    const filter = (obj: Record<string, string[]>) =>
+    const filter = <T>(obj: Record<string, T>) =>
       Object.fromEntries(Object.entries(obj).filter(([k]) => !k.startsWith(prefix) && k !== connId));
     set((s) => ({
       databases: filter(s.databases),

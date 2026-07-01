@@ -1,22 +1,26 @@
 import { create } from "zustand";
 import { invoke } from "@tauri-apps/api/core";
-import type { AppError, Connection, PingResult } from "@/lib/types";
+import type { AppError, Connection, PingResult, ServerCapabilities } from "@/lib/types";
 
 interface ConnectionState {
   connections: Connection[];
   loading: boolean;
   error: AppError | null;
+  /** Per connection id, cached capabilities. */
+  capabilities: Record<string, ServerCapabilities>;
 
   load: () => Promise<void>;
   save: (conn: Connection, secret?: string | null) => Promise<Connection>;
   remove: (id: string) => Promise<void>;
   test: (conn: Connection, secret?: string | null) => Promise<PingResult>;
+  probe: (conn: Connection, secret?: string | null) => Promise<ServerCapabilities>;
 }
 
 export const useConnectionStore = create<ConnectionState>((set, get) => ({
   connections: [],
   loading: false,
   error: null,
+  capabilities: {},
 
   load: async () => {
     set({ loading: true, error: null });
@@ -55,5 +59,14 @@ export const useConnectionStore = create<ConnectionState>((set, get) => ({
       connection: conn,
       secret: secret ?? null,
     });
+  },
+
+  probe: async (conn, secret) => {
+    const caps = await invoke<ServerCapabilities>("probe_capabilities_cmd", {
+      connection: conn,
+      secret: secret ?? null,
+    });
+    set((s) => ({ capabilities: { ...s.capabilities, [conn.id]: caps } }));
+    return caps;
   },
 }));

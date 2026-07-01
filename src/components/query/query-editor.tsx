@@ -17,6 +17,7 @@ export function QueryEditor({ tab }: Props) {
   const exec = executions[tab.id];
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [scopeLabel, setScopeLabel] = useState<string>("");
+  const [activeResultIdx, setActiveResultIdx] = useState(0);
 
   // Load secret for the connection (cached in secret store)
   const fetchSecret = useSecretStore((s) => s.fetchSecret);
@@ -121,7 +122,29 @@ export function QueryEditor({ tab }: Props) {
       {/* Results */}
       <div className="flex-1 overflow-hidden">
         {exec?.status === "success" && exec.results && exec.results.length > 0 ? (
-          <ResultGrid result={exec.results[0]} />
+          <div className="flex h-full flex-col">
+            {exec.results.length > 1 && (
+              <div className="flex border-b border-border bg-card/30">
+                {exec.results.map((r, idx) => (
+                  <button
+                    key={idx}
+                    className={`border-r border-border px-2 py-0.5 text-xs ${
+                      activeResultIdx === idx ? "bg-background font-medium" : "hover:bg-accent/30"
+                    }`}
+                    onClick={() => setActiveResultIdx(idx)}
+                  >
+                    结果 {idx + 1}
+                    {r.error && <span className="ml-1 text-destructive">⚠</span>}
+                  </button>
+                ))}
+              </div>
+            )}
+            {exec.results[activeResultIdx] ? (
+              <ResultGrid result={exec.results[activeResultIdx]} />
+            ) : (
+              <div className="p-4 text-sm text-muted-foreground">选择一个结果子 tab</div>
+            )}
+          </div>
         ) : exec?.status === "success" ? (
           <div className="p-4 text-sm text-muted-foreground">查询成功,无数据返回</div>
         ) : (

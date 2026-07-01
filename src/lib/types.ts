@@ -44,6 +44,12 @@ export interface SeriesRow {
   values: unknown[][];
 }
 
+/** Mirrors the Rust `FieldKey` — name + type from SHOW FIELD KEYS. */
+export interface FieldKey {
+  name: string;
+  type: string;
+}
+
 /** Mirrors the Rust `SaveConnectionInput`. */
 export interface SaveConnectionInput {
   connection: Connection;

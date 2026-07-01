@@ -131,7 +131,7 @@ pub async fn list_field_keys_cmd(
     secret: Option<String>,
     database: String,
     measurement: String,
-) -> Result<Vec<String>, AppError> {
+) -> Result<Vec<influx::FieldKey>, AppError> {
     influx::list_field_keys(&connection, secret.as_deref(), &database, &measurement).await
 }
 

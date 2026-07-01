@@ -130,7 +130,10 @@ export function ObjectTree({ connection }: Props) {
                               <Hash className="mr-1 inline h-3 w-3" />Field Keys
                             </div>
                             {fKeys.map((k) => (
-                              <div key={k} className="px-3 py-0.5 text-xs text-muted-foreground">{k}</div>
+                              <div key={k.name} className="flex items-center gap-1 px-3 py-0.5 text-xs text-muted-foreground">
+                                <span>{k.name}</span>
+                                <span className="rounded bg-muted px-1 text-[10px]">{k.type}</span>
+                              </div>
                             ))}
                           </div>
                         )}

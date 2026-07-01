@@ -10,8 +10,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useConnectionStore } from "@/stores/connection-store";
-import { appErrorMessage } from "@/lib/types";
-import type { AuthConfig, Connection, PingResult } from "@/lib/types";
+import { appErrorMessage, type AuthConfig, type Connection, type PingResult, type ServerCapabilities } from "@/lib/types";
 
 interface Props {
   initial?: Connection;
@@ -32,23 +31,30 @@ export function ConnectionForm({ initial, onSaved }: Props) {
   const [secret, setSecret] = useState("");
   const [testing, setTesting] = useState(false);
   const [ping, setPing] = useState<PingResult | null>(null);
+  const [caps, setCaps] = useState<ServerCapabilities | null>(null);
   const [error, setError] = useState<string | null>(null);
   const save = useConnectionStore((s) => s.save);
   const test = useConnectionStore((s) => s.test);
+  const probe = useConnectionStore((s) => s.probe);
 
   function setAuth(auth: AuthConfig) {
     setConn({ ...conn, auth });
     setSecret("");
     setPing(null);
+    setCaps(null);
   }
 
   async function handleTest() {
     setTesting(true);
     setError(null);
     setPing(null);
+    setCaps(null);
     try {
       const result = await test(conn, secret || null);
       setPing(result);
+      // Probe capabilities after successful ping (ADR-0003)
+      const capabilities = await probe(conn, secret || null);
+      setCaps(capabilities);
     } catch (e) {
       setError(appErrorMessage(e as never));
     } finally {
@@ -116,7 +122,13 @@ export function ConnectionForm({ initial, onSaved }: Props) {
           <SelectContent>
             <SelectItem value="none">无认证</SelectItem>
             <SelectItem value="basic">Basic Auth</SelectItem>
-            <SelectItem value="token">Token (1.8+)</SelectItem>
+            <SelectItem
+              value="token"
+              disabled={caps !== null && !caps.supports_token_auth}
+            >
+              Token (1.8+)
+              {caps !== null && !caps.supports_token_auth && " — 服务器不支持"}
+            </SelectItem>
           </SelectContent>
         </Select>
       </div>
@@ -165,6 +177,12 @@ export function ConnectionForm({ initial, onSaved }: Props) {
       {ping && (
         <div className="rounded-md border border-border bg-muted/30 p-2 text-sm">
           ✅ 连接成功 — InfluxDB 版本: <strong>{ping.version}</strong>
+          {caps && (
+            <div className="mt-1 text-xs text-muted-foreground">
+              Token 认证: {caps.supports_token_auth ? "✅ 支持" : "❌ 不支持"} ·
+              服务端取消: {caps.supports_server_cancel ? "✅ 支持" : "❌ 不支持"}
+            </div>
+          )}
         </div>
       )}
 

@@ -56,13 +56,42 @@ pub async fn test_connection(conn: &Connection, secret: Option<&str>) -> Result<
         .and_then(|v| v.to_str().ok())
         .unwrap_or("unknown")
         .to_string();
-    if resp.status().is_success() {
+    let status = resp.status();
+    let body = resp.text().await.unwrap_or_default();
+    if status.is_success() {
         Ok(PingResult { version, reachable: true })
     } else {
-        Err(AppError::InfluxError {
-            code: resp.status().as_u16(),
-            message: format!("ping returned {}", resp.status()),
-        })
+        Err(status_to_app_error(status, &body))
+    }
+}
+
+/// Map an HTTP status code + body to the appropriate AppError variant.
+/// 401/403 → Auth, other non-success → InfluxError.
+fn status_to_app_error(status: reqwest::StatusCode, body: &str) -> AppError {
+    let code = status.as_u16();
+    if code == 401 || code == 403 {
+        let msg = if body.is_empty() {
+            format!("authentication failed ({})", status)
+        } else {
+            body.to_string()
+        };
+        AppError::Auth(msg)
+    } else {
+        // Try to extract InfluxDB error message from JSON
+        if let Ok(parsed) = serde_json::from_str::<QueryResponse>(body) {
+            if let Some(first) = parsed.results.first() {
+                if let Some(err) = &first.error {
+                    return AppError::InfluxError {
+                        code,
+                        message: err.clone(),
+                    };
+                }
+            }
+        }
+        AppError::InfluxError {
+            code,
+            message: body.chars().take(500).collect(),
+        }
     }
 }
 
@@ -118,21 +147,7 @@ pub async fn run_query(
     let status = resp.status();
     let body = resp.text().await.map_err(|e| AppError::Internal(e.to_string()))?;
     if !status.is_success() {
-        // InfluxDB errors come as JSON with an "error" field or plain text.
-        if let Ok(parsed) = serde_json::from_str::<QueryResponse>(&body) {
-            if let Some(first) = parsed.results.first() {
-                if let Some(err) = &first.error {
-                    return Err(AppError::InfluxError {
-                        code: status.as_u16(),
-                        message: err.clone(),
-                    });
-                }
-            }
-        }
-        return Err(AppError::InfluxError {
-            code: status.as_u16(),
-            message: body.chars().take(500).collect(),
-        });
+        return Err(status_to_app_error(status, &body));
     }
     let parsed: QueryResponse = serde_json::from_str(&body)?;
     Ok(parsed.results)
@@ -169,16 +184,48 @@ pub async fn list_tag_keys(
     Ok(extract_first_column_strings(&results))
 }
 
+/// A field key with its type, from SHOW FIELD KEYS.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+pub struct FieldKey {
+    pub name: String,
+    #[serde(rename = "type")]
+    pub field_type: String,
+}
+
 /// List field keys for a measurement via SHOW FIELD KEYS.
+/// Returns {name, type} pairs.
 pub async fn list_field_keys(
     conn: &Connection,
     secret: Option<&str>,
     database: &str,
     measurement: &str,
-) -> Result<Vec<String>, AppError> {
+) -> Result<Vec<FieldKey>, AppError> {
     let q = format!("SHOW FIELD KEYS FROM \"{}\"", measurement);
     let results = run_query(conn, secret, Some(database), &q).await?;
-    Ok(extract_first_column_strings(&results))
+    let mut keys = Vec::new();
+    for result in &results {
+        for series in &result.series {
+            // columns: ["fieldKey", "fieldType"]
+            let key_idx = series.columns.iter().position(|c| c == "fieldKey");
+            let type_idx = series.columns.iter().position(|c| c == "fieldType");
+            for row in &series.values {
+                let name = key_idx
+                    .and_then(|i| row.get(i))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let ftype = type_idx
+                    .and_then(|i| row.get(i))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown")
+                    .to_string();
+                if !name.is_empty() {
+                    keys.push(FieldKey { name, field_type: ftype });
+                }
+            }
+        }
+    }
+    Ok(keys)
 }
 
 /// Extract the first column of the first series as strings.
@@ -234,7 +281,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_connection_returns_influx_error_on_failure() {
+    async fn test_connection_returns_auth_error_on_401() {
         let server = MockServer::start().await;
         Mock::given(method("GET"))
             .and(path("/ping"))
@@ -246,8 +293,8 @@ mod tests {
         let result = test_connection(&conn, None).await;
         assert!(result.is_err());
         match result.unwrap_err() {
-            AppError::InfluxError { code, .. } => assert_eq!(code, 401),
-            other => panic!("expected InfluxError, got {:?}", other),
+            AppError::Auth(_) => {} // good
+            other => panic!("expected Auth, got {:?}", other),
         }
     }
 
@@ -365,7 +412,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn list_field_keys_returns_keys() {
+    async fn list_field_keys_returns_name_and_type() {
         let server = MockServer::start().await;
         Mock::given(method("GET"))
             .and(path("/query"))
@@ -385,11 +432,31 @@ mod tests {
 
         let conn = conn_for(&server);
         let keys = list_field_keys(&conn, None, "mydb", "cpu").await.unwrap();
-        assert_eq!(keys, vec!["usage_idle", "usage_user"]);
+        assert_eq!(keys.len(), 2);
+        assert_eq!(keys[0].name, "usage_idle");
+        assert_eq!(keys[0].field_type, "float");
+        assert_eq!(keys[1].name, "usage_user");
     }
 
     #[tokio::test]
-    async fn run_query_returns_error_on_400() {
+    async fn run_query_returns_auth_error_on_401() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/query"))
+            .respond_with(ResponseTemplate::new(401))
+            .mount(&server)
+            .await;
+
+        let conn = conn_for(&server);
+        let result = run_query(&conn, None, None, "SELECT 1").await;
+        match result.unwrap_err() {
+            AppError::Auth(_) => {} // good
+            other => panic!("expected Auth, got {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    async fn run_query_returns_influx_error_on_400() {
         let server = MockServer::start().await;
         Mock::given(method("GET"))
             .and(path("/query"))
