@@ -1,6 +1,13 @@
 import { useState, useCallback } from "react";
 import { useMetadataStore } from "@/stores/metadata-store";
 import { useSecretStore } from "@/stores/secret-store";
+import { useQueryStore } from "@/stores/query-store";
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu";
 import { ChevronRight, ChevronDown, Database as DbIcon, Table2, Tag, Hash, RefreshCw } from "lucide-react";
 import type { Connection } from "@/lib/types";
 
@@ -14,6 +21,7 @@ export function ObjectTree({ connection }: Props) {
   const [filter, setFilter] = useState("");
   const { databases, measurements, tagKeys, fieldKeys, fetchDatabases, fetchMeasurements, fetchTagKeys, fetchFieldKeys } = useMetadataStore();
   const getSecret = useSecretStore((s) => s.getSecret);
+  const { openTab, updateSource } = useQueryStore();
   const [loading, setLoading] = useState(false);
 
   const dbKey = connection.id;
@@ -109,14 +117,46 @@ export function ObjectTree({ connection }: Props) {
                     const fKeys = fieldKeys[`${connection.id}:${db}:${ms}`] ?? [];
                     return (
                       <div key={ms}>
-                        <button
-                          className="flex w-full items-center gap-1 rounded px-1 py-0.5 hover:bg-accent/50"
-                          onClick={() => toggleMeasurement(db, ms)}
-                        >
-                          {msExpanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
-                          <Table2 className="h-3.5 w-3.5 text-muted-foreground" />
-                          <span className="truncate text-xs">{ms}</span>
-                        </button>
+                        <ContextMenu>
+                          <ContextMenuTrigger asChild>
+                            <button
+                              className="flex w-full items-center gap-1 rounded px-1 py-0.5 hover:bg-accent/50"
+                              onClick={() => toggleMeasurement(db, ms)}
+                            >
+                              {msExpanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+                              <Table2 className="h-3.5 w-3.5 text-muted-foreground" />
+                              <span className="truncate text-xs">{ms}</span>
+                            </button>
+                          </ContextMenuTrigger>
+                          <ContextMenuContent className="w-48">
+                            <ContextMenuItem
+                              onClick={() => {
+                                const q = `SELECT * FROM "${ms}" LIMIT 100`;
+                                const tabId = openTab(connection, connection.default_database ?? db);
+                                // Sync update — Zustand batching guarantees state is updated
+                                setTimeout(() => {
+                                  const tab = useQueryStore.getState().tabs.find(t => t.id === tabId);
+                                  if (tab) updateSource(tab.id, q);
+                                }, 0);
+                              }}
+                            >
+                              Preview 100 行
+                            </ContextMenuItem>
+                            <ContextMenuItem onClick={() => navigator.clipboard.writeText(ms)}>
+                              复制名称
+                            </ContextMenuItem>
+                            <ContextMenuItem
+                              onClick={() => {
+                                const active = useQueryStore.getState().tabs.find(t => t.id === useQueryStore.getState().activeTabId);
+                                if (active) {
+                                  updateSource(active.id, active.source + `\n${ms}`);
+                                }
+                              }}
+                            >
+                              插入到编辑器
+                            </ContextMenuItem>
+                          </ContextMenuContent>
+                        </ContextMenu>
 
                         {msExpanded && (
                           <div className="ml-3 border-l border-border pl-1">

@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { invoke } from "@tauri-apps/api/core";
 import type { AppError, Connection, QueryResult } from "@/lib/types";
+import { useErrorLogStore } from "./error-log-store";
 
 export interface QueryTab {
   id: string;
@@ -14,6 +15,7 @@ export interface QueryTab {
 export interface QueryExecution {
   tabId: string;
   status: "idle" | "running" | "success" | "error";
+  queryId?: string;
   results?: QueryResult[];
   autoLimitApplied?: boolean;
   truncated?: boolean;
@@ -32,6 +34,7 @@ interface QueryState {
   setActiveTab: (id: string) => void;
   updateSource: (id: string, source: string) => void;
   runQuery: (tabId: string, statements: string[]) => Promise<void>;
+  cancelQuery: (tabId: string) => Promise<void>;
 }
 
 let tabCounter = 0;
@@ -80,10 +83,12 @@ export const useQueryStore = create<QueryState>((set, get) => ({
     const tab = get().tabs.find((t) => t.id === tabId);
     if (!tab) return;
 
+    const queryId = `q-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
     set((s) => ({
       executions: {
         ...s.executions,
-        [tabId]: { tabId, status: "running" },
+        [tabId]: { tabId, status: "running", queryId },
       },
     }));
 
@@ -103,6 +108,7 @@ export const useQueryStore = create<QueryState>((set, get) => ({
           secret: null,
           database: tab.database,
           query,
+          query_id: queryId,
           auto_limit: true,
         },
       });
@@ -122,17 +128,37 @@ export const useQueryStore = create<QueryState>((set, get) => ({
         },
       }));
     } catch (e) {
+      const err = e as AppError;
+      // Don't log cancellations as errors
+      if (err.kind !== "Cancelled") {
+        useErrorLogStore.getState().push({
+          connectionName: tab.connection.name,
+          database: tab.database,
+          query: statements.join(";\n"),
+          error: err,
+        });
+      }
       set((s) => ({
         executions: {
           ...s.executions,
           [tabId]: {
             tabId,
             status: "error",
-            error: e as AppError,
+            error: err,
             elapsedMs: Date.now() - start,
           },
         },
       }));
+    }
+  },
+
+  cancelQuery: async (tabId) => {
+    const exec = get().executions[tabId];
+    if (exec?.status !== "running" || !exec.queryId) return;
+    try {
+      await invoke("cancel_query_cmd", { queryId: exec.queryId });
+    } catch {
+      // Best-effort cancel
     }
   },
 }));

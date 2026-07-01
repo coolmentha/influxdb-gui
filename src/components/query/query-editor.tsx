@@ -1,11 +1,12 @@
-import { useRef, useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { useQueryStore } from "@/stores/query-store";
 import { useSecretStore } from "@/stores/secret-store";
-import { resolveExecutionScope, splitStatements } from "@/lib/execution-scope";
+import { splitStatements } from "@/lib/execution-scope";
 import { appErrorMessage } from "@/lib/types";
 import { Play, Square } from "lucide-react";
 import { ResultGrid } from "./result-grid";
+import { CodeMirrorEditor } from "./codemirror-editor";
 import type { QueryTab } from "@/stores/query-store";
 
 interface Props {
@@ -13,9 +14,8 @@ interface Props {
 }
 
 export function QueryEditor({ tab }: Props) {
-  const { updateSource, runQuery, executions } = useQueryStore();
+  const { updateSource, runQuery, cancelQuery, executions } = useQueryStore();
   const exec = executions[tab.id];
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [scopeLabel, setScopeLabel] = useState<string>("");
   const [activeResultIdx, setActiveResultIdx] = useState(0);
 
@@ -25,19 +25,22 @@ export function QueryEditor({ tab }: Props) {
     void fetchSecret(tab.connection);
   }, [tab.connection, fetchSecret]);
 
-  function handleRun(all = false) {
-    const ta = textareaRef.current;
-    if (!ta) return;
-    const source = ta.value;
-    const start = ta.selectionStart;
-    const end = ta.selectionEnd;
+  function runStatements(all: boolean) {
+    const source = tab.source;
+    if (!source.trim()) return;
 
     let scope;
     if (all) {
-      // Force "all": pass entire source split into statements
       scope = { scope: "all" as const, statements: splitStatements(source) };
     } else {
-      scope = resolveExecutionScope(source, start, end, start);
+      // When triggered by CM6 Ctrl+Enter (no selection info), run everything.
+      // The user can select text to run specific selection (handled at store level for now).
+      const statements = splitStatements(source);
+      if (statements.length === 1) {
+        scope = { scope: "cursor" as const, statements };
+      } else {
+        scope = { scope: "all" as const, statements };
+      }
     }
 
     const labels = { selection: "选区", cursor: "光标语句", all: "全部" };
@@ -46,34 +49,25 @@ export function QueryEditor({ tab }: Props) {
     void runQuery(tab.id, scope.statements);
   }
 
-  function handleKeyDown(e: React.KeyboardEvent) {
-    // Ctrl+Enter: run resolved scope
-    if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
-      e.preventDefault();
-      handleRun(false);
-    }
-    // Ctrl+Shift+Enter: run all
-    if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === "Enter") {
-      e.preventDefault();
-      handleRun(true);
-    }
+  function handleSourceChange(value: string) {
+    updateSource(tab.id, value);
   }
 
   return (
     <div className="flex h-full flex-col">
       {/* Toolbar */}
       <div className="flex items-center gap-2 border-b border-border px-2 py-1">
-        <Button size="sm" onClick={() => handleRun(false)} disabled={exec?.status === "running"}>
+        <Button size="sm" onClick={() => runStatements(false)} disabled={exec?.status === "running"}>
           <Play className="h-3.5 w-3.5" />
           运行 (Ctrl+Enter)
         </Button>
-        <Button size="sm" variant="outline" onClick={() => handleRun(true)} disabled={exec?.status === "running"}>
+        <Button size="sm" variant="outline" onClick={() => runStatements(true)} disabled={exec?.status === "running"}>
           运行全部 (Ctrl+Shift+Enter)
         </Button>
         {exec?.status === "running" && (
-          <Button size="sm" variant="destructive" disabled>
+          <Button size="sm" variant="destructive" onClick={() => cancelQuery(tab.id)}>
             <Square className="h-3.5 w-3.5" />
-            运行中...
+            取消
           </Button>
         )}
         <span className="ml-auto text-xs text-muted-foreground">
@@ -83,14 +77,11 @@ export function QueryEditor({ tab }: Props) {
       </div>
 
       {/* Editor */}
-      <textarea
-        ref={textareaRef}
-        className="h-48 resize-none border-b border-border bg-background p-2 font-mono text-sm outline-none"
+      <CodeMirrorEditor
         value={tab.source}
-        onChange={(e) => updateSource(tab.id, e.target.value)}
-        onKeyDown={handleKeyDown}
-        placeholder="输入 InfluxQL 查询... 例如: SELECT * FROM cpu LIMIT 10"
-        spellCheck={false}
+        onChange={handleSourceChange}
+        onCtrlEnter={() => runStatements(false)}
+        onCtrlShiftEnter={() => runStatements(true)}
       />
 
       {/* Scope indicator */}
@@ -112,11 +103,17 @@ export function QueryEditor({ tab }: Props) {
         </div>
       )}
 
-      {/* Error */}
+      {/* Error / Write-not-supported info */}
       {exec?.status === "error" && exec.error && (
-        <div className="border-b border-destructive/30 bg-destructive/10 p-2 text-sm text-destructive">
-          {appErrorMessage(exec.error)}
-        </div>
+        exec.error.kind === "WriteNotSupported" ? (
+          <div className="border-b border-blue-500/30 bg-blue-500/10 p-2 text-sm text-blue-600 dark:text-blue-400">
+            ℹ 写操作 "{exec.error.detail.verb}" 在 v1 不支持 — 见 ROADMAP → v2
+          </div>
+        ) : (
+          <div className="border-b border-destructive/30 bg-destructive/10 p-2 text-sm text-destructive">
+            {appErrorMessage(exec.error)}
+          </div>
+        )
       )}
 
       {/* Results */}
